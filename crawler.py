@@ -2558,7 +2558,7 @@ class AmoreMallCrawler:
         
         return products, brand_name
     
-    def crawl_brand_products(self, brand_url: str, max_products: int = None, max_pages_per_product: int = 10, max_reviews_per_product: int = None, test_mode: bool = False, max_more_clicks: int = None) -> tuple[List[Dict], str]:
+    def crawl_brand_products(self, brand_url: str, max_products: int = None, max_pages_per_product: int = 10, max_reviews_per_product: int = None, test_mode: bool = False, max_more_clicks: int = None, resume: bool = True) -> tuple[List[Dict], str]:
         """
         브랜드의 모든 제품 리뷰 크롤링
         
@@ -2568,6 +2568,8 @@ class AmoreMallCrawler:
             max_pages_per_product: 제품당 최대 페이지 수
             max_reviews_per_product: 제품당 최대 리뷰 수
             test_mode: 테스트 모드 (더 보기 버튼 3번만 클릭)
+            max_more_clicks: 더 보기 버튼 최대 클릭 횟수
+            resume: 중단 후 재개 모드 (기존 JSON 파일에서 이미 크롤링된 제품 건너뛰기)
             
         Returns:
             (각 제품의 크롤링 결과 리스트, 브랜드명) 튜플
@@ -2579,16 +2581,47 @@ class AmoreMallCrawler:
             print("⚠ 제품을 찾을 수 없습니다.")
             return [], brand_name
         
-        # 2. 각 제품의 리뷰 크롤링
+        # 2. 중단 후 재개: 기존 JSON 파일에서 이미 크롤링된 제품 확인
+        crawled_product_codes = set()
+        if resume:
+            info_file = f"info_{brand_name}.json"
+            if os.path.exists(info_file):
+                try:
+                    with open(info_file, 'r', encoding='utf-8') as f:
+                        existing_data = json.load(f)
+                        for product in existing_data.get('products', []):
+                            if product.get('product_code'):
+                                crawled_product_codes.add(product['product_code'])
+                    if crawled_product_codes:
+                        print(f"\n✓ 기존 크롤링 데이터 발견: {len(crawled_product_codes)}개 제품 이미 크롤링됨")
+                        print(f"  → 중단된 지점부터 재개합니다.")
+                except Exception as e:
+                    if self.debug:
+                        print(f"  [디버깅] 기존 파일 읽기 오류: {e}")
+        
+        # 3. 각 제품의 리뷰 크롤링
         results = []
         total_products = len(products)
+        skipped_count = 0
         
         print(f"\n{'='*60}")
         print(f"총 {total_products}개 제품의 리뷰 크롤링 시작")
+        if crawled_product_codes:
+            print(f"  (이미 크롤링된 {len(crawled_product_codes)}개 제품 건너뛰기)")
         print(f"{'='*60}")
         
         for idx, product in enumerate(products, 1):
-            print(f"\n[{idx}/{total_products}] {product.get('product_name', '제품명 없음')}")
+            product_code = product.get('product_code', '')
+            product_name = product.get('product_name', '제품명 없음')
+            
+            # 이미 크롤링된 제품은 건너뛰기
+            if resume and product_code and product_code in crawled_product_codes:
+                print(f"\n[{idx}/{total_products}] {product_name}")
+                print(f"  ⏭ 이미 크롤링된 제품입니다. 건너뜁니다.")
+                skipped_count += 1
+                continue
+            
+            print(f"\n[{idx}/{total_products}] {product_name}")
             print(f"  URL: {product['product_url']}")
             
             try:
@@ -2621,7 +2654,7 @@ class AmoreMallCrawler:
                 continue
         
         print(f"\n{'='*60}")
-        print(f"크롤링 완료: {len(results)}개 제품")
+        print(f"크롤링 완료: {len(results)}개 제품 (건너뛴 제품: {skipped_count}개)")
         print(f"{'='*60}")
         
         return results, brand_name

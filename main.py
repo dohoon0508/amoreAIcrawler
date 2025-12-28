@@ -95,26 +95,54 @@ def main():
                 # 크롤러에서 추출한 브랜드명 사용
                 base_name = brand_name if brand_name else f"brand_{time.strftime('%Y%m%d')}"
             
-            # 제품 정보만 저장
+            # 제품 정보만 저장 (기존 데이터와 병합)
             info_file = f"info_{base_name}.json"
-            all_products_info = []
+            existing_products = {}
+            if os.path.exists(info_file):
+                try:
+                    with open(info_file, 'r', encoding='utf-8') as f:
+                        existing_data = json.load(f)
+                        for product in existing_data.get('products', []):
+                            if product.get('product_code'):
+                                existing_products[product['product_code']] = product
+                    if existing_products:
+                        print(f"  ✓ 기존 제품 정보 {len(existing_products)}개 로드됨")
+                except:
+                    pass
+            
+            # 새로 크롤링한 제품 정보 추가/업데이트
             for result in results:
                 product_info = result['product_info']
-                all_products_info.append(product_info)
+                product_code = product_info.get('product_code')
+                if product_code:
+                    existing_products[product_code] = product_info
+            
+            all_products_info = list(existing_products.values())
             
             info_data = {
                 'brand_url': args.url,
                 'crawled_at': time.strftime('%Y-%m-%d %H:%M:%S'),
-                'total_products': len(results),
+                'total_products': len(all_products_info),
                 'products': all_products_info
             }
             
             with open(info_file, 'w', encoding='utf-8') as f:
                 json.dump(info_data, f, ensure_ascii=False, indent=2)
             
-            # 리뷰만 저장
+            # 리뷰만 저장 (기존 데이터와 병합)
             review_file = f"review_{base_name}.json"
-            all_reviews_list = []
+            existing_reviews = []
+            if os.path.exists(review_file):
+                try:
+                    with open(review_file, 'r', encoding='utf-8') as f:
+                        existing_data = json.load(f)
+                        existing_reviews = existing_data.get('reviews', [])
+                    if existing_reviews:
+                        print(f"  ✓ 기존 리뷰 {len(existing_reviews)}개 로드됨")
+                except:
+                    pass
+            
+            # 새로 크롤링한 리뷰 추가
             for result in results:
                 product_info = result['product_info']
                 reviews = result['reviews']
@@ -123,13 +151,13 @@ def main():
                     review_with_product = review.copy()
                     review_with_product['product_code'] = product_info.get('product_code', '')
                     review_with_product['product_name'] = product_info.get('product_name', '')
-                    all_reviews_list.append(review_with_product)
+                    existing_reviews.append(review_with_product)
             
             review_data = {
                 'brand_url': args.url,
                 'crawled_at': time.strftime('%Y-%m-%d %H:%M:%S'),
-                'total_reviews': total_reviews,
-                'reviews': all_reviews_list
+                'total_reviews': len(existing_reviews),
+                'reviews': existing_reviews
             }
             
             with open(review_file, 'w', encoding='utf-8') as f:
@@ -137,10 +165,10 @@ def main():
             
             print(f"\n✓ JSON 파일 저장 완료:")
             print(f"  - 제품 정보: {info_file}")
-            print(f"    - 총 {len(results)}개 제품")
+            print(f"    - 총 {len(all_products_info)}개 제품 (신규: {len(results)}개)")
             print(f"    - 파일 크기: {os.path.getsize(info_file) / 1024 / 1024:.2f} MB")
             print(f"  - 리뷰: {review_file}")
-            print(f"    - 총 {total_reviews}개 후기")
+            print(f"    - 총 {len(existing_reviews)}개 후기 (신규: {total_reviews}개)")
             print(f"    - 파일 크기: {os.path.getsize(review_file) / 1024 / 1024:.2f} MB")
             return
         
