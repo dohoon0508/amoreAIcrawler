@@ -2210,53 +2210,60 @@ class AmoreMallCrawler:
                     print(f"    → 모든 제품을 로드하기 위해 스크롤 중...")
                 
                 scroll_count = 0
-                max_scrolls = 15  # 최대 15번 스크롤
+                max_scrolls = 25  # 최대 25번 스크롤 (증가)
                 last_count = 0
                 no_change_count = 0
+                more_button_clicked = False
                 
                 while scroll_count < max_scrolls:
                     # 부드러운 점진적 스크롤
                     last_height = self.driver.execute_script("return document.body.scrollHeight")
-                    scroll_steps = 8
+                    scroll_steps = 10  # 더 세밀한 스크롤
                     for i in range(scroll_steps):
                         scroll_position = int((i + 1) * (last_height / scroll_steps))
                         self.driver.execute_script(f"window.scrollTo(0, {scroll_position});")
-                        time.sleep(0.3)
+                        time.sleep(0.2)
                     
                     # 끝까지 스크롤
                     self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-                    time.sleep(3)  # 제품 로드 대기 (시간 증가)
+                    time.sleep(3)  # 제품 로드 대기
                     
-                    # "더 보기" 버튼 클릭 시도
-                    try:
-                        more_button_selectors = [
-                            (By.XPATH, "//*[contains(text(), '더 보기')]"),
-                            (By.XPATH, "//*[contains(text(), '더보기')]"),
-                            (By.XPATH, "//*[contains(text(), '더 많은')]"),
-                            (By.XPATH, "//button[contains(@class, 'more')]"),
-                            (By.XPATH, "//a[contains(@class, 'more')]"),
-                            (By.CSS_SELECTOR, "[class*='more'][class*='button']"),
-                            (By.CSS_SELECTOR, "[class*='load'][class*='more']"),
-                        ]
-                        
-                        for by, selector in more_button_selectors:
-                            try:
-                                more_buttons = self.driver.find_elements(by, selector)
-                                for btn in more_buttons:
-                                    if btn.is_displayed() and btn.is_enabled():
-                                        self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", btn)
-                                        time.sleep(0.5)
-                                        self.driver.execute_script("arguments[0].click();", btn)
-                                        time.sleep(3)  # 클릭 후 제품 로드 대기
-                                        print(f"    → '더 보기' 버튼 클릭")
-                                        # 버튼 클릭 후 다시 스크롤
-                                        self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-                                        time.sleep(2)
-                                        break
-                            except:
-                                continue
-                    except:
-                        pass
+                    # "더 보기" 버튼 클릭 시도 (더 적극적으로)
+                    if not more_button_clicked or scroll_count % 3 == 0:  # 3번마다 다시 시도
+                        try:
+                            more_button_selectors = [
+                                (By.XPATH, "//*[contains(text(), '더 보기')]"),
+                                (By.XPATH, "//*[contains(text(), '더보기')]"),
+                                (By.XPATH, "//*[contains(text(), '더 많은')]"),
+                                (By.XPATH, "//button[contains(@class, 'more')]"),
+                                (By.XPATH, "//a[contains(@class, 'more')]"),
+                                (By.CSS_SELECTOR, "[class*='more'][class*='button']"),
+                                (By.CSS_SELECTOR, "[class*='load'][class*='more']"),
+                                (By.XPATH, "//*[contains(@class, 'btn') and contains(text(), '더')]"),
+                            ]
+                            
+                            for by, selector in more_button_selectors:
+                                try:
+                                    more_buttons = self.driver.find_elements(by, selector)
+                                    for btn in more_buttons:
+                                        try:
+                                            if btn.is_displayed() and btn.is_enabled():
+                                                self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", btn)
+                                                time.sleep(0.5)
+                                                self.driver.execute_script("arguments[0].click();", btn)
+                                                time.sleep(3)  # 클릭 후 제품 로드 대기
+                                                print(f"    → '더 보기' 버튼 클릭")
+                                                more_button_clicked = True
+                                                # 버튼 클릭 후 다시 스크롤
+                                                self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+                                                time.sleep(2)
+                                                break
+                                        except:
+                                            continue
+                                except:
+                                    continue
+                        except:
+                            pass
                     
                     # 현재 제품 개수 확인 (스크롤 및 버튼 클릭 후)
                     current_links = self.driver.find_elements(By.CSS_SELECTOR, "a[href*='/product/detail']")
@@ -2274,12 +2281,37 @@ class AmoreMallCrawler:
                         print(f"    ✓ 목표 제품 수({max_products_target}개)에 도달! (현재: {current_count}개)")
                         break
                     
-                    # 제품 개수가 변하지 않으면 종료
+                    # 제품 개수가 변하지 않으면 종료 (더 관대하게)
                     if current_count == last_count:
                         no_change_count += 1
-                        if no_change_count >= 2:  # 2번 연속 변하지 않으면 종료
-                            print(f"    → 제품 개수가 더 이상 증가하지 않습니다. (현재: {current_count}개)")
-                            break
+                        # 목표가 있고 아직 도달하지 않았으면 더 시도
+                        if max_products_target and current_count < max_products_target:
+                            if no_change_count >= 4:  # 4번 연속 변하지 않으면 종료
+                                print(f"    → 제품 개수가 더 이상 증가하지 않습니다. (현재: {current_count}개 / 목표: {max_products_target}개)")
+                                # 목표 미달 시 한 번만 추가 시도
+                                if scroll_count < max_scrolls - 1:
+                                    print(f"    → 목표 제품 수({max_products_target}개) 미달, 한 번만 추가 시도... (현재: {current_count}개)")
+                                    time.sleep(2)
+                                    self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+                                    time.sleep(3)
+                                    # 다시 카운트
+                                    current_links = self.driver.find_elements(By.CSS_SELECTOR, "a[href*='/product/detail']")
+                                    seen_hrefs = set()
+                                    for link in current_links:
+                                        href = link.get_attribute('href')
+                                        if href and '/product/detail' in href:
+                                            if href.startswith('/'):
+                                                href = 'https://www.amoremall.com' + href
+                                            seen_hrefs.add(href)
+                                    current_count = len(seen_hrefs)
+                                    if current_count >= max_products_target:
+                                        print(f"    ✓ 목표 제품 수({max_products_target}개)에 도달! (현재: {current_count}개)")
+                                        break
+                                break
+                        else:
+                            if no_change_count >= 3:  # 목표가 없으면 3번 연속 변하지 않으면 종료
+                                print(f"    → 제품 개수가 더 이상 증가하지 않습니다. (현재: {current_count}개)")
+                                break
                     else:
                         no_change_count = 0
                         print(f"    → 제품 개수 증가: {last_count}개 → {current_count}개")
@@ -2582,7 +2614,8 @@ class AmoreMallCrawler:
             return [], brand_name
         
         # 2. 중단 후 재개: 기존 JSON 파일에서 이미 크롤링된 제품 확인
-        crawled_product_codes = set()
+        crawled_online_prod_sns = set()  # onlineProdSn 기준으로 매칭
+        crawled_product_codes = set()  # product_code로도 매칭
         if resume:
             info_file = f"info_{brand_name}.json"
             if os.path.exists(info_file):
@@ -2590,10 +2623,16 @@ class AmoreMallCrawler:
                     with open(info_file, 'r', encoding='utf-8') as f:
                         existing_data = json.load(f)
                         for product in existing_data.get('products', []):
+                            # URL에서 onlineProdSn 추출 (가장 정확한 매칭 방법)
+                            if product.get('product_url'):
+                                match = re.search(r'onlineProdSn=(\d+)', product['product_url'])
+                                if match:
+                                    crawled_online_prod_sns.add(match.group(1))
+                            # 제품 코드로도 매칭 (보조)
                             if product.get('product_code'):
                                 crawled_product_codes.add(product['product_code'])
-                    if crawled_product_codes:
-                        print(f"\n✓ 기존 크롤링 데이터 발견: {len(crawled_product_codes)}개 제품 이미 크롤링됨")
+                    if crawled_online_prod_sns or crawled_product_codes:
+                        print(f"\n✓ 기존 크롤링 데이터 발견: {len(crawled_online_prod_sns)}개 제품 (onlineProdSn 기준)")
                         print(f"  → 중단된 지점부터 재개합니다.")
                 except Exception as e:
                     if self.debug:
@@ -2606,16 +2645,29 @@ class AmoreMallCrawler:
         
         print(f"\n{'='*60}")
         print(f"총 {total_products}개 제품의 리뷰 크롤링 시작")
-        if crawled_product_codes:
-            print(f"  (이미 크롤링된 {len(crawled_product_codes)}개 제품 건너뛰기)")
+        if crawled_online_prod_sns:
+            print(f"  (이미 크롤링된 {len(crawled_online_prod_sns)}개 제품 건너뛰기)")
         print(f"{'='*60}")
         
         for idx, product in enumerate(products, 1):
             product_code = product.get('product_code', '')
+            product_url = product.get('product_url', '')
             product_name = product.get('product_name', '제품명 없음')
             
+            # 이미 크롤링된 제품인지 확인 (onlineProdSn 기준으로 매칭)
+            is_crawled = False
+            if resume:
+                # URL에서 onlineProdSn 추출하여 매칭 (가장 정확)
+                if product_url and 'onlineProdSn=' in product_url:
+                    match = re.search(r'onlineProdSn=(\d+)', product_url)
+                    if match and match.group(1) in crawled_online_prod_sns:
+                        is_crawled = True
+                # 제품 코드로도 확인 (보조)
+                if not is_crawled and product_code and product_code in crawled_product_codes:
+                    is_crawled = True
+            
             # 이미 크롤링된 제품은 건너뛰기
-            if resume and product_code and product_code in crawled_product_codes:
+            if is_crawled:
                 print(f"\n[{idx}/{total_products}] {product_name}")
                 print(f"  ⏭ 이미 크롤링된 제품입니다. 건너뜁니다.")
                 skipped_count += 1

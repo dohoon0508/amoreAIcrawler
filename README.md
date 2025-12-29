@@ -22,6 +22,8 @@
 - 브랜드 페이지에서 모든 제품 자동 탐색
 - 각 제품별 정보 및 리뷰 수집
 - JSON 파일 자동 분리 저장 (제품 정보 / 리뷰)
+- **재개 기능**: 중단된 크롤링을 자동으로 이어서 진행
+- **중복 리뷰 제거**: 동일한 리뷰 자동 감지 및 제거
 
 ## 설치
 
@@ -90,6 +92,8 @@ python main.py "https://www.amoremall.com/kr/ko/display/brand/detail/all?brandSn
 | `--use-openai` | OpenAI API를 사용한 요약 | False |
 | `--db-path PATH` | 데이터베이스 파일 경로 | amoremall_reviews.db |
 | `--output PATH` | JSON 파일 저장 경로 (단일 제품 모드) | - |
+
+**참고**: 브랜드 크롤링 모드에서는 재개 기능이 기본적으로 활성화되어 있습니다. 같은 브랜드 URL로 다시 실행하면 중단된 지점부터 자동으로 이어서 진행됩니다.
 
 ### 4. 사용 예시
 
@@ -225,10 +229,10 @@ python main.py "https://www.amoremall.com/kr/ko/display/brand/detail/all?brandSn
 
 **주요 메서드:**
 - `get_product_info()`: 제품 기본 정보 수집
-- `extract_reviews()`: 리뷰 수집 (더보기 버튼 자동 클릭)
+- `extract_reviews()`: 리뷰 수집 (더보기 버튼 자동 클릭, 중복 제거)
 - `_get_product_info_from_notice()`: 상품정보제공 고시에서 상세 정보 수집
-- `get_brand_products()`: 브랜드 페이지에서 모든 제품 링크 추출
-- `crawl_brand_products()`: 브랜드 전체 제품 크롤링
+- `get_brand_products()`: 브랜드 페이지에서 모든 제품 링크 추출 (목표 제품 수까지 자동 스크롤)
+- `crawl_brand_products()`: 브랜드 전체 제품 크롤링 (재개 기능 포함)
 
 ### `summarizer.py`
 - `ReviewSummarizer`: 후기 요약 클래스
@@ -251,10 +255,15 @@ python main.py "https://www.amoremall.com/kr/ko/display/brand/detail/all?brandSn
 
 1. **제품 목록 수집**
    - 브랜드 페이지 접속
-   - 스크롤하여 모든 제품 로드
+   - 스크롤하여 모든 제품 로드 (목표 제품 수까지 자동 스크롤)
    - 제품 링크 추출
 
-2. **각 제품별 크롤링**
+2. **재개 기능 확인** (자동)
+   - 기존 `info_{브랜드명}.json` 파일 확인
+   - 이미 크롤링된 제품은 자동으로 건너뜀
+   - 누락된 제품만 크롤링 진행
+
+3. **각 제품별 크롤링**
    - 제품 페이지 접속
    - 기본 제품 정보 수집 (가격, 평점 등)
    - 리뷰 탭 클릭
@@ -263,10 +272,66 @@ python main.py "https://www.amoremall.com/kr/ko/display/brand/detail/all?brandSn
    - "상품정보제공 고시 보기"에서 상세 정보 수집
    - 뒤로가기로 브랜드 페이지로 복귀
 
-3. **데이터 저장**
-   - 제품 정보: `info_{브랜드명}.json`
-   - 리뷰: `review_{브랜드명}.json`
+4. **데이터 저장 및 병합**
+   - 제품 정보: `info_{브랜드명}.json` (기존 데이터와 병합)
+   - 리뷰: `review_{브랜드명}.json` (기존 데이터와 병합)
+   - 중복 리뷰 자동 제거 (제품코드 + 사용자명 + 리뷰텍스트 기준)
    - (선택) 데이터베이스 저장
+
+## 주요 기능 상세
+
+### 재개 기능 (Resume)
+
+브랜드 크롤링 중 중단되더라도 같은 브랜드 URL로 다시 실행하면 자동으로 이어서 진행됩니다.
+
+**작동 방식:**
+- 기존 `info_{브랜드명}.json` 파일을 읽어서 이미 크롤링된 제품 확인
+- `onlineProdSn`과 `product_code` 기준으로 매칭
+- 이미 크롤링된 제품은 자동으로 건너뛰고 누락된 제품만 크롤링
+- 새로 크롤링한 데이터를 기존 데이터와 자동 병합
+
+**예시:**
+```bash
+# 첫 실행 (77개 제품 크롤링 시작)
+python main.py "https://www.amoremall.com/kr/ko/display/brand/detail/all?brandSn=18" --brand --max-more-clicks 10
+
+# 중단 후 재개 (이미 크롤링된 제품은 건너뛰고 나머지만 진행)
+python main.py "https://www.amoremall.com/kr/ko/display/brand/detail/all?brandSn=18" --brand --max-more-clicks 10
+```
+
+### 중복 리뷰 제거
+
+크롤링 과정에서 중복으로 수집된 리뷰를 자동으로 제거합니다.
+
+**제거 기준:**
+- 제품코드 + 사용자명 + 리뷰텍스트 조합이 동일한 경우
+- 저장 시 자동으로 중복 제거되어 고유 리뷰만 저장됩니다
+
+**수동 중복 제거:**
+```python
+# Python 스크립트로 중복 제거 (예시)
+import json
+from collections import defaultdict
+
+with open('review_LANEIGE.json', 'r', encoding='utf-8') as f:
+    data = json.load(f)
+
+reviews = data.get('reviews', [])
+seen = set()
+unique_reviews = []
+
+for r in reviews:
+    sig = f"{r.get('product_code')}|{r.get('username')}|{r.get('review_text', '').strip()}"
+    if sig not in seen:
+        seen.add(sig)
+        unique_reviews.append(r)
+
+data['reviews'] = unique_reviews
+data['total_reviews'] = len(unique_reviews)
+
+with open('review_LANEIGE.json', 'w', encoding='utf-8') as f:
+    json.dump(data, f, ensure_ascii=False, indent=2)
+```
 
 ## 주의사항
 
@@ -279,10 +344,12 @@ python main.py "https://www.amoremall.com/kr/ko/display/brand/detail/all?brandSn
    - 브랜드 전체 크롤링은 시간이 오래 걸릴 수 있습니다 (77개 제품 기준 약 1-2시간)
    - `--test` 모드로 먼저 테스트하는 것을 권장합니다
    - `--headless` 모드를 사용하면 더 빠르게 실행됩니다
+   - 재개 기능을 활용하면 중단된 크롤링을 효율적으로 완료할 수 있습니다
 
 3. **데이터 저장**
    - 대량의 리뷰를 수집하면 JSON 파일 크기가 커질 수 있습니다 (10,000개 리뷰 ≈ 10MB)
    - 데이터베이스 저장 시 디스크 공간을 확인하세요
+   - 중복 리뷰는 자동으로 제거되지만, 백업 파일을 생성하는 것을 권장합니다
 
 4. **OpenAI API**
    - OpenAI API 사용 시 API 키가 필요하며, 사용량에 따라 비용이 발생할 수 있습니다
@@ -305,7 +372,13 @@ pip install --upgrade webdriver-manager
 
 ### 제품 개수가 맞지 않음
 - 브랜드 페이지에서 스크롤이 완전히 로드되지 않았을 수 있습니다
-- `get_brand_products()` 메서드의 스크롤 로직을 확인하세요
+- `get_brand_products()` 메서드의 스크롤 로직이 개선되어 목표 제품 수까지 자동으로 스크롤합니다
+- 목표 제품 수가 표시되지 않는 경우 수동으로 확인하세요
+
+### 중복 리뷰 문제
+- 크롤링 과정에서 중복 리뷰가 수집될 수 있습니다
+- 저장 시 자동으로 중복 제거되지만, 수동으로도 확인 가능합니다
+- 중복 제거 기준: 제품코드 + 사용자명 + 리뷰텍스트 조합
 
 ## 라이선스
 
